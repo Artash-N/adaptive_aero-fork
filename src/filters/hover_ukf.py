@@ -44,7 +44,7 @@ class HoverUKF:
         self.ukf.update(z=np.asarray(vio_pos_w_m, dtype=float), R=self.R)
 
     def state(self) -> np.ndarray:
-        return self.ukf.state.mean.copy()
+        return self.ukf.state.x.copy()
 
     def covariance(self) -> np.ndarray:
-        return self.ukf.state.cov.copy()
+        return self.ukf.state.P.copy()

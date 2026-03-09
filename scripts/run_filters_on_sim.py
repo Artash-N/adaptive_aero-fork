@@ -41,21 +41,17 @@ def load_npz(path: Path) -> dict[str, np.ndarray]:
     return {k: data[k] for k in data.files}
 
 
-def make_initial_state_from_truth(truth_pos: np.ndarray, truth_vel: np.ndarray, truth_quat: np.ndarray) -> np.ndarray:
-    # Expected order from earlier ukf_core sketch:
-    # [px, py, pz, vx, vy, vz, qx, qy, qz, qw]
+def make_initial_state_from_truth(
+    truth_pos: np.ndarray,
+    truth_vel: np.ndarray,
+    truth_quat: np.ndarray,
+) -> np.ndarray:
     q = np.asarray(truth_quat, dtype=float).reshape(4)
-    if np.allclose(q, 0.0):
-        q = np.array([0.0, 0.0, 0.0, 1.0], dtype=float)
 
-    # Your env log stores quat_wb. Earlier helpers used [qx, qy, qz, qw] in state.
-    # If your truth_quat is [qw, qx, qy, qz], reorder here.
-    if abs(q[0]) <= 1.0 and abs(q[3]) <= 1.0:
-        # Heuristic: env.py earlier used quat_wb = [w, x, y, z]
-        qx, qy, qz, qw = q[1], q[2], q[3], q[0]
-    else:
-        qx, qy, qz, qw = q[0], q[1], q[2], q[3]
+    # truth_quat_wb from env is [w, x, y, z]
+    qw, qx, qy, qz = q[0], q[1], q[2], q[3]
 
+    # UKF full state is [p(3), v(3), q_xyzw(4)]
     return np.array(
         [
             truth_pos[0], truth_pos[1], truth_pos[2],
@@ -71,9 +67,11 @@ def make_initial_covariance() -> np.ndarray:
         [
             0.20, 0.20, 0.20,   # position
             0.50, 0.50, 0.50,   # velocity
-            0.05, 0.05, 0.05,   # attitude error-state scale proxy
+            0.05, 0.05, 0.05,   # local attitude error
         ]
     )
+
+
 
 
 def pos_from_state(x: np.ndarray) -> np.ndarray:
@@ -139,7 +137,9 @@ def main() -> None:
     race_p = np.full((n, P0.shape[0], P0.shape[1]), np.nan, dtype=float)
     adaptive_p = np.full((n, P0.shape[0], P0.shape[1]), np.nan, dtype=float)
 
-    adaptive_R = np.full(n, np.nan, dtype=float)
+    adaptive_pos_var = np.full(n, np.nan, dtype=float)
+    adaptive_vel_var = np.full(n, np.nan, dtype=float)
+    adaptive_att_var = np.full(n, np.nan, dtype=float)
 
     for k in range(1, n):
         dt = float(t[k] - t[k - 1])
@@ -149,16 +149,18 @@ def main() -> None:
         if imu_valid[k]:
             hover.predict(imu_acc[k], imu_gyro[k], dt)
             race.predict(imu_acc[k], imu_gyro[k], dt)
-            adaptive.predict(imu_acc[k], imu_gyro[k], dt)
+            adaptive.predict(
+                imu_accel_mps2=imu_acc[k],
+                imu_gyro_radps=imu_gyro[k],
+                dt=dt,
+                rpm_sq_sum=float(telemetry_rpm_sq_sum[k]),
+                specific_force_mag_mps2=float(telemetry_specific_force_mag[k]),
+            )
 
         if vio_valid[k]:
             hover.update_vio(vio_pos[k])
             race.update_vio(vio_pos[k])
-            adaptive.update_vio(
-                vio_pos_w_m=vio_pos[k],
-                rpm_sq_sum=float(telemetry_rpm_sq_sum[k]),
-                specific_force_mag_mps2=float(telemetry_specific_force_mag[k]),
-            )
+            adaptive.update_vio(vio_pos[k])
 
         hover_x[k] = hover.state()
         race_x[k] = race.state()
@@ -168,7 +170,9 @@ def main() -> None:
         race_p[k] = race.covariance()
         adaptive_p[k] = adaptive.covariance()
 
-        adaptive_R[k] = adaptive.last_R_scalar
+        adaptive_pos_var[k] = adaptive.last_pos_var
+        adaptive_vel_var[k] = adaptive.last_vel_var
+        adaptive_att_var[k] = adaptive.last_att_var
 
     hover_pos = hover_x[:, :3]
     race_pos = race_x[:, :3]
@@ -187,7 +191,9 @@ def main() -> None:
         "hover_cov": hover_p,
         "race_cov": race_p,
         "adaptive_cov": adaptive_p,
-        "adaptive_R_scalar": adaptive_R,
+        "adaptive_pos_var": adaptive_pos_var,
+        "adaptive_vel_var": adaptive_vel_var,
+        "adaptive_att_var": adaptive_att_var,
         "hover_pos_w": hover_pos,
         "race_pos_w": race_pos,
         "adaptive_pos_w": adaptive_pos,

@@ -222,7 +222,7 @@ class UKF():
                     label="Initial pose")
 
         # plot the position history 
-        plt.plot(poses[:, 0], poses[:, 1], poses[:, 2] label="pose")
+        plt.plot(poses[:, 0], poses[:, 1], poses[:, 2], label="pose")
 
         plt.legend()
         plt.grid(True)

@@ -173,13 +173,24 @@ class UnscentedKalmanFilter:
 
     def initialize(self, x0: Array, P0: Array, t0: Optional[float] = None) -> None:
         x0 = np.asarray(x0, dtype=float).reshape(-1)
-        if x0.shape != (self.n,):
-            raise ValueError(f"x0 must have shape ({self.n},), got {x0.shape}")
         P0 = np.asarray(P0, dtype=float)
-        if P0.shape != (self.n, self.n):
-            raise ValueError(f"P0 must have shape ({self.n}, {self.n}), got {P0.shape}")
-        self.state = UKFState(x=self.model.post_process_state(x0.copy()), P=ensure_psd(P0, self.cfg.jitter), t=t0)
 
+        full_n = self.model.full_state_dim
+        err_n = self.n
+
+        # Full nominal state: [p, v, q] -> 10D
+        if x0.shape != (full_n,):
+            raise ValueError(f"x0 must have shape ({full_n},), got {x0.shape}")
+
+        # Covariance lives in local error-state space -> 9x9
+        if P0.shape != (err_n, err_n):
+            raise ValueError(f"P0 must have shape ({err_n}, {err_n}), got {P0.shape}")
+
+        self.state = UKFState(
+            x=self.model.post_process_state(x0.copy()),
+            P=ensure_psd(P0, self.cfg.jitter),
+            t=t0,
+        )
     def require_initialized(self) -> UKFState:
         if self.state is None:
             raise RuntimeError("UKF must be initialized before use")

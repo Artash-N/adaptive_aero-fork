@@ -13,23 +13,30 @@ from src.filters.ukf_core import (
 
 @dataclass(slots=True)
 class AdaptiveUKFConfig:
-    # Base process noise
+    # Base process noise floor
     pos_process_var: float = 3e-5
     vel_process_var: float = 2e-2
     att_process_var: float = 3e-5
 
-    # Base measurement noise floor
+    # Keep VIO measurement noise fixed
     vio_pos_var: float = 0.05 ** 2
 
-    # Paper-inspired adaptive scaling:
-    # R_k = R_floor + alpha * sum(RPM_i^2) + beta * ||a||
-    #
-    # We normalize sum(RPM^2) by 4 * max_rpm^2 so alpha stays sane.
-    alpha_rpm_var: float = 0.50
-    beta_g_var: float = 0.03
+    # Adaptive scaling for PROCESS noise Q
+    # Q_k = Q_floor + alpha * normalized_sum_rpm_sq + beta * ||specific_force||
+    alpha_pos_var: float = 2e-4
+    alpha_vel_var: float = 5e-2
+    alpha_att_var: float = 2e-4
+
+    beta_pos_var: float = 1e-4
+    beta_vel_var: float = 2e-2
+    beta_att_var: float = 1e-4
 
     motor_max_rpm: float = 12000.0
-    max_vio_var: float = 2.0
+
+    # Caps so Q does not explode
+    max_pos_var: float = 5e-3
+    max_vel_var: float = 5e-1
+    max_att_var: float = 5e-3
 
     def rpm_sq_norm(self, rpm_sq_sum: float) -> float:
         return float(rpm_sq_sum / (4.0 * self.motor_max_rpm ** 2))
@@ -41,48 +48,75 @@ class AdaptiveUKF:
         self.model = DroneStateSpaceModel()
         self.ukf = UnscentedKalmanFilter(self.model)
 
-        self.Q = make_process_noise(
-            pos_var=self.cfg.pos_process_var,
-            vel_var=self.cfg.vel_process_var,
-            att_var=self.cfg.att_process_var,
-        )
+        # Fixed VIO measurement covariance
+        self.R = make_position_measurement_noise(self.cfg.vio_pos_var)
 
-        self.last_R_scalar: float = self.cfg.vio_pos_var
+        # For logging/debugging
+        self.last_pos_var: float = self.cfg.pos_process_var
+        self.last_vel_var: float = self.cfg.vel_process_var
+        self.last_att_var: float = self.cfg.att_process_var
 
     def initialize(self, x0: np.ndarray, P0: np.ndarray) -> None:
         self.ukf.initialize(x0, P0)
 
-    def predict(self, imu_accel_mps2: np.ndarray, imu_gyro_radps: np.ndarray, dt: float) -> None:
-        u = np.concatenate([imu_accel_mps2, imu_gyro_radps]).astype(float)
-        self.ukf.predict(u=u, dt=dt, Q=self.Q)
-
-    def compute_R(
+    def compute_Q(
         self,
         rpm_sq_sum: float,
         specific_force_mag_mps2: float,
     ) -> np.ndarray:
-        rpm_term = self.cfg.alpha_rpm_var * self.cfg.rpm_sq_norm(rpm_sq_sum)
-        g_term = self.cfg.beta_g_var * float(specific_force_mag_mps2)
+        rpm_term = self.cfg.rpm_sq_norm(rpm_sq_sum)
+        g_term = float(specific_force_mag_mps2)
 
-        R_scalar = self.cfg.vio_pos_var + rpm_term + g_term
-        R_scalar = float(np.clip(R_scalar, self.cfg.vio_pos_var, self.cfg.max_vio_var))
-        self.last_R_scalar = R_scalar
-        return make_position_measurement_noise(R_scalar)
+        pos_var = (
+            self.cfg.pos_process_var
+            + self.cfg.alpha_pos_var * rpm_term
+            + self.cfg.beta_pos_var * g_term
+        )
+        vel_var = (
+            self.cfg.vel_process_var
+            + self.cfg.alpha_vel_var * rpm_term
+            + self.cfg.beta_vel_var * g_term
+        )
+        att_var = (
+            self.cfg.att_process_var
+            + self.cfg.alpha_att_var * rpm_term
+            + self.cfg.beta_att_var * g_term
+        )
 
-    def update_vio(
+        pos_var = float(np.clip(pos_var, self.cfg.pos_process_var, self.cfg.max_pos_var))
+        vel_var = float(np.clip(vel_var, self.cfg.vel_process_var, self.cfg.max_vel_var))
+        att_var = float(np.clip(att_var, self.cfg.att_process_var, self.cfg.max_att_var))
+
+        self.last_pos_var = pos_var
+        self.last_vel_var = vel_var
+        self.last_att_var = att_var
+
+        return make_process_noise(
+            pos_var=pos_var,
+            vel_var=vel_var,
+            att_var=att_var,
+        )
+
+    def predict(
         self,
-        vio_pos_w_m: np.ndarray,
+        imu_accel_mps2: np.ndarray,
+        imu_gyro_radps: np.ndarray,
+        dt: float,
         rpm_sq_sum: float,
         specific_force_mag_mps2: float,
     ) -> None:
-        R = self.compute_R(
+        u = np.concatenate([imu_accel_mps2, imu_gyro_radps]).astype(float)
+        Q = self.compute_Q(
             rpm_sq_sum=rpm_sq_sum,
             specific_force_mag_mps2=specific_force_mag_mps2,
         )
-        self.ukf.update(z=np.asarray(vio_pos_w_m, dtype=float), R=R)
+        self.ukf.predict(u=u, dt=dt, Q=Q)
+
+    def update_vio(self, vio_pos_w_m: np.ndarray) -> None:
+        self.ukf.update(z=np.asarray(vio_pos_w_m, dtype=float), R=self.R)
 
     def state(self) -> np.ndarray:
-        return self.ukf.state.mean.copy()
+        return self.ukf.state.x.copy()
 
     def covariance(self) -> np.ndarray:
-        return self.ukf.state.cov.copy()
+        return self.ukf.state.P.copy()
