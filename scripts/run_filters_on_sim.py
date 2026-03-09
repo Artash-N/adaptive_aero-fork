@@ -140,6 +140,7 @@ def main() -> None:
     adaptive_pos_var = np.full(n, np.nan, dtype=float)
     adaptive_vel_var = np.full(n, np.nan, dtype=float)
     adaptive_att_var = np.full(n, np.nan, dtype=float)
+    adaptive_nis_multiplier = np.full(n, np.nan, dtype=float)
 
     for k in range(1, n):
         dt = float(t[k] - t[k - 1])
@@ -173,6 +174,7 @@ def main() -> None:
         adaptive_pos_var[k] = adaptive.last_pos_var
         adaptive_vel_var[k] = adaptive.last_vel_var
         adaptive_att_var[k] = adaptive.last_att_var
+        adaptive_nis_multiplier[k] = adaptive.last_nis_multiplier
 
     hover_pos = hover_x[:, :3]
     race_pos = race_x[:, :3]
@@ -194,6 +196,7 @@ def main() -> None:
         "adaptive_pos_var": adaptive_pos_var,
         "adaptive_vel_var": adaptive_vel_var,
         "adaptive_att_var": adaptive_att_var,
+        "adaptive_nis_multiplier": adaptive_nis_multiplier,
         "hover_pos_w": hover_pos,
         "race_pos_w": race_pos,
         "adaptive_pos_w": adaptive_pos,

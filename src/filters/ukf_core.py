@@ -112,6 +112,13 @@ class UKFState:
     t: Optional[float] = None
 
 
+@dataclass(slots=True)
+class UKFUpdateDiagnostics:
+    innovation: Array
+    innovation_covariance: Array
+    nis: float
+
+
 class StateSpaceModel(ABC):
     """
     Minimal interface for the unscented filter backbone.
@@ -170,6 +177,7 @@ class UnscentedKalmanFilter:
         self.Wc[0] = self.Wm[0] + (1.0 - self.cfg.alpha * self.cfg.alpha + self.cfg.beta)
 
         self.state: Optional[UKFState] = None
+        self.last_update_diagnostics: Optional[UKFUpdateDiagnostics] = None
 
     def initialize(self, x0: Array, P0: Array, t0: Optional[float] = None) -> None:
         x0 = np.asarray(x0, dtype=float).reshape(-1)
@@ -269,12 +277,18 @@ class UnscentedKalmanFilter:
 
         K = Pxz @ np.linalg.inv(S)
         innov = self.model.innovation(z, z_pred)
+        nis = float(innov.T @ np.linalg.solve(S, innov))
         dx_update = K @ innov
 
         x_new = self.model.post_process_state(self.model.retract(st.x, dx_update))
         P_new = ensure_psd(st.P - K @ S @ K.T, self.cfg.jitter)
 
         self.state = UKFState(x=x_new, P=P_new, t=st.t)
+        self.last_update_diagnostics = UKFUpdateDiagnostics(
+            innovation=innov.copy(),
+            innovation_covariance=S.copy(),
+            nis=nis,
+        )
         return self.state
 
 
