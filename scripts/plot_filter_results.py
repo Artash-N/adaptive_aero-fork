@@ -251,6 +251,47 @@ def main() -> None:
     save_fig(fig, out_dir / "filter_rmse_bar.png")
 
     # --------------------------------------------------
+    # 7) 95% confidence interval vs actual error
+    # --------------------------------------------------
+
+    hover_cov = filt["hover_cov"]
+    race_cov = filt["race_cov"]
+    adaptive_cov = filt["adaptive_cov"]
+
+    def pos_sigma(P):
+        if not np.isfinite(P).all():
+            return np.nan
+        Ppos = P[:3, :3]
+        return np.sqrt(np.trace(Ppos))
+
+    hover_sigma = np.array([pos_sigma(P) for P in hover_cov])
+    race_sigma = np.array([pos_sigma(P) for P in race_cov])
+    adaptive_sigma = np.array([pos_sigma(P) for P in adaptive_cov])
+
+    hover_95 = 1.96 * hover_sigma
+    race_95 = 1.96 * race_sigma
+    adaptive_95 = 1.96 * adaptive_sigma
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    ax.plot(t, hover_err, label="Hover error", color="blue", linewidth=1.2)
+    ax.fill_between(t, -hover_95, hover_95, color="blue", alpha=0.15)
+
+    ax.plot(t, race_err, label="Race error", color="orange", linewidth=1.2)
+    ax.fill_between(t, -race_95, race_95, color="orange", alpha=0.15)
+
+    ax.plot(t, adaptive_err, label="Adaptive error", color="green", linewidth=1.2)
+    ax.fill_between(t, -adaptive_95, adaptive_95, color="green", alpha=0.15)
+
+    ax.set_title("Position Error with 95% Confidence Interval")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Position error (m)")
+
+    ax.legend()
+
+    save_fig(fig, out_dir / "filter_95ci_vs_error.png")
+
+    # --------------------------------------------------
     # Console summary
     # --------------------------------------------------
     print("\n--- Filter Plot Summary ---")

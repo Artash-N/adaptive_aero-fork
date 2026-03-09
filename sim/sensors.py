@@ -107,11 +107,11 @@ class ImuConfig:
     #
     # Because RPM^2 is huge numerically, we normalize by motor_max_rpm^2 later.
     # alpha / beta still control the covariance growth.
-    alpha_accel_var: float = 0.80
-    alpha_gyro_var: float = 0.030
+    alpha_accel_var: float = 1.5
+    alpha_gyro_var: float = 0.080
 
-    beta_accel_var: float = 0.020
-    beta_gyro_var: float = 0.0015
+    beta_accel_var: float = 0.050
+    beta_gyro_var: float = 0.0040
 
     # Slowly varying bias terms
     accel_bias_std_mps2: Array3 = field(
@@ -158,9 +158,9 @@ class ImuConfig:
 
 @dataclass(slots=True)
 class VioConfig:
-    rate_hz: float = 30.0
-    pos_noise_std_m: float = 0.05
-    latency_s: float = 0.03
+    rate_hz: float = 20.0
+    pos_noise_std_m: float = 0.1
+    latency_s: float = 0.05
 
     def __post_init__(self) -> None:
         if self.rate_hz <= 0.0:
