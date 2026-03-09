@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+import math
 import numpy as np
 
 from src.filters.ukf_core import (
@@ -37,6 +38,53 @@ class AdaptiveUKFConfig:
     max_pos_var: float = 5e-3
     max_vel_var: float = 5e-1
     max_att_var: float = 5e-3
+
+    validate_finite_scalars: bool = True
+
+    def __post_init__(self) -> None:
+        if self.motor_max_rpm <= 0.0:
+            raise ValueError("motor_max_rpm must be > 0")
+
+        base_vars = {
+            "pos_process_var": self.pos_process_var,
+            "vel_process_var": self.vel_process_var,
+            "att_process_var": self.att_process_var,
+        }
+        adaptive_gains = {
+            "alpha_pos_var": self.alpha_pos_var,
+            "alpha_vel_var": self.alpha_vel_var,
+            "alpha_att_var": self.alpha_att_var,
+            "beta_pos_var": self.beta_pos_var,
+            "beta_vel_var": self.beta_vel_var,
+            "beta_att_var": self.beta_att_var,
+        }
+        caps = {
+            "max_pos_var": (self.max_pos_var, self.pos_process_var),
+            "max_vel_var": (self.max_vel_var, self.vel_process_var),
+            "max_att_var": (self.max_att_var, self.att_process_var),
+        }
+
+        for name, value in base_vars.items():
+            if value < 0.0:
+                raise ValueError(f"{name} must be non-negative")
+
+        for name, value in adaptive_gains.items():
+            if value < 0.0:
+                raise ValueError(f"{name} must be non-negative")
+
+        for name, (cap_value, base_value) in caps.items():
+            if cap_value < 0.0:
+                raise ValueError(f"{name} must be non-negative")
+            if cap_value < base_value:
+                raise ValueError(f"{name} must be >= corresponding base variance")
+
+        if self.validate_finite_scalars:
+            for field in fields(self):
+                value = getattr(self, field.name)
+                if isinstance(value, bool):
+                    continue
+                if isinstance(value, (int, float)) and not math.isfinite(value):
+                    raise ValueError(f"{field.name} must be finite")
 
     def rpm_sq_norm(self, rpm_sq_sum: float) -> float:
         return float(rpm_sq_sum / (4.0 * self.motor_max_rpm ** 2))
