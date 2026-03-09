@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+import math
 import numpy as np
 
 from src.filters.ukf_core import (
